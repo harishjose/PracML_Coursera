@@ -1,0 +1,145 @@
+---
+title: 'Practical Machine Learning Project:'
+author: "Harish Jose"
+output:
+  html_document: default
+  pdf_document:
+    fig_height: 4
+    highlight: tango
+---
+
+##Practical Machine Learning Project:
+#### Background:
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+#### Executive Summary:
+From the question, it is clear that this is a classification Machine Learning problem. The outcome is the "classe" variable. I have identified Random Forest to be viable method, and performed cross validation using a 3 fold method within the training data. Additionally the out of sample error was found to be 0.9%. The model showed a capable accuracy of 99.1% with a 95% confidence interval of (98.9%, 99.3%).
+
+#### Data PreProcessing:
+The first step was to download the two files to the working directory.
+
+This is followed by enabling the libraries needed for the project (caret, and corrplot.)
+
+```{r}
+setwd("C:/Users/Harish/Desktop/Coursera/Practical ML/assignment")
+library(caret)
+library(corrplot)
+```
+The two data sets were downloaded to the working directory.
+```{r}
+training <- read.csv("C:/Users/Harish/Desktop/Coursera/Practical ML/assignment/pml-training.csv", header = TRUE)
+test  <- read.csv('C:/Users/Harish/Desktop/Coursera/Practical ML/assignment/pml-testing.csv')
+```
+It was noted that there were 160 variables (or 159 factors) in the data set. Hence the data was cleaned up by removing the columns with majority of NAs, columns with almost zero variance, unwanted columns with time stamps, names etc. The clean up code is a mishmash of what I learned from the lectures, stackexchange, Max Kuhn's paper and Google. I found that using the complete.cases function removed a big chunk of rows instead of unwanted columns.
+
+```{r}
+#remove columns with majority of NAs
+nas<- apply(training,2,function(x) {sum(is.na(x))});
+training <- training[,which(nas <  nrow(training)*0.9)];  
+ 
+#remove columns with near zero variance 
+nzvs <- nearZeroVar(training, saveMetrics = TRUE)
+training <- training[, nzvs$nzv==FALSE]
+ 
+#remove obvious non-value adding columns
+training<-training[,7:ncol(training)]
+```
+The code below is inspired from Max Kuhn's Journal paper on Caret, and is a simpler way of eliminating highly correlated (r > 0.9) columns similar to PCA. (Source: "Building Predictive Models in R Using the caret Package" paper by Max Kuhn http://www.jstatsoft.org/v28/i05/paper)
+
+```{r}
+#since classe is categorical data, first remove 53rd column to find highly correlated factors
+trainDescr <- training[, -53]
+#remove highly correlated columns
+descrCorr <- cor(trainDescr)
+highCorr <- findCorrelation(descrCorr, 0.90)
+trainDescr <- trainDescr[, -highCorr]
+ncol(trainDescr)
+#now only has 45 variables
+#now reattach the classe column
+x <- cbind( trainDescr, training[53] ) 
+```
+
+Now we see that we have only 45 predictors and we started off with 159 predictors.
+
+#### Data Slicing:
+The training data is further sliced in to training (60%) and validating (40%). This is done as shown below. Please note that, I am calling the 40% data as validating since we already have a test data provided.
+```{r}
+#partition out
+inTrain <- createDataPartition(y=x$classe,
+                              p=0.6, list=FALSE)
+training <- x[inTrain,]
+validating <- x[-inTrain,]
+```
+#### Exploratory Data Analysis on Remaining factors:
+At this point we can do a quick correlation plot on the cleaned up data as shown below. If we see strong relationships, we might be able to tweak the model to decrease the factors further.
+```{r}
+##correlation plot on remaining factors
+correlation_remaining <- cor(training[, -46])
+corrplot(correlation_remaining, order = 'hclust',tl.cex = .5)
+```
+
+And we can see that there are only a few factors that show some correlation (indicated by dark red and blue colors). This is partly due to the fact that we have removed the strongly correlated combination of factors.
+
+### Cross Validation:
+Now that we have the data ready, we need to test out models and perform cross validation based on the models. The cross validation ensures that we do not overfit and reduce the accuracy of the model in predicting real world data. I have chosen k-fold method with 3 folds to be efficient. Additionally, I am testing out Random Forest Method (rf) and Boosted Trees Method (gbm).Based on the best accuracy statement (and lowest out of sample error value), we will choose the best model to test out the validating data, and finally apply this to the test data. We will set the seed at 32343 for reproducibility purposes.
+```{r}
+set.seed(32343)
+```
+
+### Cross Validation with Random Forest
+```{r results="hide"}
+rf_model <- train(training$classe ~ ., method = "rf", data = training, trControl = trainControl(method = "cv", 3))
+```
+The confusion matrix code details the accuracy and sample error rate.
+```{r}
+rf_Pred <- predict(rf_model)
+confusionMatrix(training$classe, rf_Pred)
+```
+### Cross Validation with GBM:
+```{r results="hide"}
+#gbm_model <- train(classe ~.,data=training, method="gbm")
+gbm_model <- train(training$classe ~ ., method = "gbm", data = training, trControl = trainControl(method = "cv", 3))
+```
+The confusion matrix code details the accuracy and sample error rate.
+```{r}
+gbm_Pred <- predict(gbm_model)
+confusionMatrix(training$classe, gbm_Pred)
+```
+###Best Model = Random Forest:
+We can see that the best model is the Random Forest model based on the high accuracy rate of 100% and 0% as the in sample error rate.
+
+###Estimation of Out of Sample Error for Random Forest:
+We have seen 0% as the in sample error rate. The Out of Sample error is always slighlty higher than this. Thus we can estimate that the out of sample error slightly above 0% and most likely less than 1%.
+
+#### Out of Sample Error for the Random Forest model:
+The Out of Sample Error is found by using the model on untested Validating data that we earlier partitioned out. This is simply the complement of the overall accuracy of the model. Thus the out of sample error is found to be 0.009 or 0.9%, as shown below.
+
+Additionally, the accuracy of the model is 99.1%.
+
+```{r}
+##testing prediction with validating data
+rf_predValidating <- predict(rf_model, newdata = validating)
+confusionMatrix(validating$classe, rf_predValidating)
+out_of_sample_E <- 1 - as.numeric(confusionMatrix(validating$classe, rf_predValidating)$overall[1])
+out_of_sample_E 
+```
+
+#### Predicting the results on the Test data:
+Now we can apply the Random Forest model to the Test data and predict the classe based on the predictors.
+
+####Actual test data prediction with Random Forest Model:
+```{r}
+predictTest <- predict(rf_model, test)
+predictTest
+```
+
+####Conclusion:
+We have successfully cleaned up the original data with 159 factors to 45 factors, and successfully trained the data set with a random forest model, performed 3-fold cross validation, and determined the out of error value by testing the model on the untouched 40% of the data sliced (validating). Finally, we were also able to successfully apply the model to predict the outcomes on the given test model.
+
+In Sample Error of RF model = 0.0%
+
+Out of Sample Error of RF model = 0.9%
+
+Accuracy of the RF model on Validating data = 99.1%
+
+95% CI for Accuracy: (98.9%, 99.3%)
